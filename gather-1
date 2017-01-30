@@ -1,0 +1,329 @@
+lib
+
+#!/usr/bin/python
+#-*-coding:utf-8-*-
+
+
+# 导入采集需要用到的模块
+import re, sys, time
+import httplib, os.path as osp
+from urlparse import urlparse
+# 使用sqite数据库，为了兼容DreamHost.com的空间，只能这么写了
+try :
+    import sqlite3 as sqlite
+except ImportError:
+    from pysqlite2 import dbapi2 as sqlite
+import ConfigParser 
+
+
+
+# 请求
+def http_get(url,headers=None):
+    default_headers = {
+            "Accept": "*/*",
+            "User-Agent": "Baiduspider+(+http://www.baidu.com/search/spider.htm)",
+            "Client-Ip":'180.149.130.112',
+            "X-Forwarded-For":'180.149.130.112',
+            "Referer": url
+        }
+    if headers :
+        default_headers.update(headers)
+    urls = urlparse(url);
+    http_type = urls[0]
+    domain = urls[1]
+    path = urls[2];
+    if urls[4]!='' : path += '?' + urls[4]
+    # 连接服务器
+    dl = httplib.HTTPConnection(domain)
+    dl.request(method="GET", url=path, headers=default_headers)
+    rs = dl.getresponse()
+    if rs.status==200 :
+        R = rs.read()
+    else :
+        print "3 seconds, try again ..."; time.sleep(3)
+        dl.request(method="GET", url=path, headers=headers); rs = dl.getresponse()
+        if rs.status==200 :
+            R = rs.read()
+        else :
+            print "3 seconds, try again ..."; time.sleep(3)
+            dl.request(method="GET", url=path, headers=headers); rs = dl.getresponse()
+            if rs.status==200 :
+                R = rs.read()
+            else :
+                print "Continue to collect ..."
+                R = 3
+    # 返回结果
+    return R
+
+
+#获取配置
+def get_config(file_name,section):
+    out = {}
+    if not section : print 'section not none!';exit(); 
+    cf = ConfigParser.ConfigParser() 
+    cf.read(file_name)
+    if section in cf.sections():
+        items = cf.items(section)
+        for item in items:
+            out[item[0]] = item[1]
+            pass
+    return out
+
+
+
+# html代码截取函数
+def between(html,start,end,cls=''):
+    if len(html)==0 : return ;
+    # 正则表达式截取
+    if start[:1]==chr(40) and start[-1:]==chr(41) and end[:1]==chr(40) and end[-1:]==chr(41) :
+        reHTML = re.search(start + '(.*?)' + end,html,re.I)
+        if reHTML == None : return 
+        reHTML = reHTML.group()
+        intStart = re.search(start,reHTML,re.I).end()
+        intEnd = re.search(end,reHTML,re.I).start()
+        R = reHTML[intStart:intEnd]
+    # 字符串截取
+    else :
+        # 取得开始字符串的位置
+        intStart = html.lower().find(start.lower())
+        # 如果搜索不到开始字符串，则直接返回空
+        if intStart == -1 : return 
+        # 取得结束字符串的位置
+        intEnd = html[intStart+len(start):].lower().find(end.lower())
+        # 如果搜索不到结束字符串，也返回为空
+        if intEnd == -1 : return 
+        # 开始和结束字符串都有了，可以开始截取了
+        R = html[intStart+len(start):intStart+intEnd+len(start)]
+    # 清理内容
+    if cls != '' :
+        R = clear(R,cls)
+    # 返回截取的字符
+    return R
+
+# 替换实体为正常字符
+def en2chr(enStr):
+    return enStr.replace('&amp;','&')
+
+# 正则清除
+def clear(html,regexs):
+    if regexs == '' : return html
+    for regex in regexs.split(chr(10)):
+        regex = regex.strip()
+        if regex != '' :
+            if regex[:1]==chr(40) and regex[-1:]==chr(41):
+                html = re.sub(regex,'',html,re.I|re.S)
+            else :
+                html = html.replace(regex,'')
+    return html
+
+
+
+# 格式化url
+def formatURL(html,url):
+    urls = re.findall('''(<a[^>]*?href="([^"]+)"[^>]*?>)|(<a[^>]*?href='([^']+)'[^>]*?>)''',html,re.I)
+    if urls == None : return html
+    for regs in urls :
+        html = html.replace(regs[0],matchURL(regs[0],url))
+    return html
+
+
+
+# 清除html代码里的多余空格
+def u_trim(html):
+    if len(html) == 0 : return ''
+    html = re.sub('\r|\n|\t','',html)
+    html = html.replace('  ',' ').strip()
+    return html
+
+#正则获取多个
+def u_rule(pattern,string,flags=re.I|re.M):
+	items = re.findall(pattern,string,flags)
+	return items
+
+#正则获取单个
+def u_rule_one(pattern,string,flags=re.I|re.M):
+	items = u_rule(pattern,string,flags)
+	return items[0]
+
+
+conf
+
+  [global]
+
+  Client-Ip = 180.149.130.112
+  X-Forwarded-For = 180.149.130.112
+
+  [list]
+
+  type = 1
+  url = http://so.gushiwen.org/type.aspx?p=1&c=先秦||http://so.gushiwen.org/type.aspx?p=1&c=两汉||http://m.gushiwen.org/type.aspx?p=1&c=魏晋||http://so.gushiwen.org/type.aspx?p=1&c=南北朝||http://so.gushiwen.org/type.aspx?p=1&c=隋代||http://so.gushiwen.org/type.aspx?p=1&c=唐代||http://so.gushiwen.org/type.aspx?p=1&c=五代||http://so.gushiwen.org/type.aspx?p=1&c=宋代||http://so.gushiwen.org/type.aspx?p=1&c=金朝||http://so.gushiwen.org/type.aspx?p=1&c=元代||http://so.gushiwen.org/type.aspx?p=1&c=明代||http://so.gushiwen.org/type.aspx?p=1&c=清代||
+
+  url_rule = <p><a style=" font-size:14px;" href="(.*?)" target="_blank">
+
+
+  [field]
+
+  title = {u_rule:fasdf|||fasdf,u_trim:''}
+
+  author = {u_rule:fasdf|||fasdf,u_trim:''}
+
+  content = {u_rule:fasdf|||fasdf,u_trim:''}
+
+  other = {update_time : {u_rule:fasdf|||fasdf,u_trim:''}}
+
+gather.py
+
+
+#!/usr/bin/python
+#-*-coding:utf-8-*-
+
+
+# 导入采集需要用到的模块
+import re, sys, time
+import httplib, os.path as osp
+from urlparse import urlparse
+# 使用sqite数据库，为了兼容DreamHost.com的空间，只能这么写了
+try :
+    import sqlite3 as sqlite
+except ImportError:
+    from pysqlite2 import dbapi2 as sqlite
+import ConfigParser 
+from lib import *
+
+
+
+
+# 创建数据库
+def create_acticle_db(conn,db_name):
+    # if osp.isfile(osp.abspath(db_name)) : return 
+    c = conn.cursor()
+    # 文章列表
+    c.execute('''DROP TABLE IF EXISTS "acticle";''')
+    c.execute('''
+        CREATE TABLE "acticle" (
+            "id"  INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            "title"  TEXT,
+            "author"  TEXT,
+            "content"  TEXT,
+            "other"  TEXT,
+            "status"  INTEGER,
+            "add_time" TEXT,
+            "send_time"  TEXT
+        );
+    ''')
+    # 文章地址
+    c.execute('''DROP TABLE IF EXISTS "acticle_url";''')
+    c.execute('''
+        CREATE TABLE "acticle_url" (
+            "id"  INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            "url_list_id"  INTEGER,
+            "url"  TEXT,
+            "status"  INTEGER,
+            "add_time" TEXT,
+            UNIQUE("url")
+        );
+    ''')
+    # 文章内容
+    c.execute('''DROP TABLE IF EXISTS "url_list";''')
+    c.execute('''
+        CREATE TABLE "url_list" (
+            "id"  INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            "url"  TEXT,
+            "status"  INTEGER,
+            "add_time" TEXT,
+            UNIQUE("url")
+        );
+    ''')
+    #提交
+    conn.commit()
+    c.close()
+
+
+
+
+if __name__ == '__main__':
+
+
+    # 采集速度控制，单位秒
+    sleep = 0
+    # 数据库路径
+    db_name = './database.db'
+    # 设置提交的header头
+    headers = {"Accept": "*/*","Referer": "http://answers.yahoo.com/","User-Agent": " Baiduspider+(+http://www.baidu.com/search/spider.htm)"}
+
+    # 连接数据库
+    conn = sqlite.connect(osp.abspath(db_name))
+
+    _url_list = '''http://so.gushiwen.org/type.aspx?p=1&c=先秦||http://so.gushiwen.org/type.aspx?p=1&c=两汉||http://m.gushiwen.org/type.aspx?p=1&c=魏晋||http://so.gushiwen.org/type.aspx?p=1&c=南北朝||http://so.gushiwen.org/type.aspx?p=1&c=隋代||http://so.gushiwen.org/type.aspx?p=1&c=唐代||http://so.gushiwen.org/type.aspx?p=1&c=五代||http://so.gushiwen.org/type.aspx?p=1&c=宋代||http://so.gushiwen.org/type.aspx?p=1&c=金朝||http://so.gushiwen.org/type.aspx?p=1&c=元代||http://so.gushiwen.org/type.aspx?p=1&c=明代||http://so.gushiwen.org/type.aspx?p=1&c=清代||
+'''
+
+
+    #创建初始的库
+    # create_acticle_db(conn,db_name)
+
+    #
+
+    #
+    # url = 'http://so.gushiwen.org/type.aspx?p=1&c=先秦'
+
+    # res = http_get(url,headers=None)
+    # print res
+    #获取配置
+    config_global = get_config('1.conf','global')
+    config_list = get_config('1.conf','list')
+    config_field = get_config('1.conf','field')
+
+    #列表的文章地址
+    if config_list['type'] == '1':
+
+        list_urls = config_list['url'].split('||')
+        print list_urls
+        
+        # config_list['url_rule']
+
+    exit()
+
+
+    print config_global
+    print config_list
+    print config_field
+
+
+
+    exit()
+
+
+
+
+
+
+    print 1111
+    print chr(10)
+
+    html = '''<a>fasdfasdf adfsasdf  asdf a sdf  sa fd asd f asdf f<a>
+asdfasdf
+a
+sdf22
+as
+df
+a
+sdf<a>fasdfasdfasdf<a>
+fasdfasdfasdfasdf
+a
+sdf
+
+asdfasdffs
+22
+    '''
+    print html
+    regexs = '<a>'
+    html = u_trim(html)
+    print html
+    print "----rule----"
+    print u_rule_one('<a>(.*?)<a>',html)
+
+
+
+
+
+
